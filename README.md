@@ -1,0 +1,2 @@
+# frasmotic
+Dictionary generation tool
