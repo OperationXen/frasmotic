@@ -16,6 +16,8 @@ SortOnLast = False		#option to avoid performance hit on wordlists that are alrea
 IgnoredFileExtensions = [".inc", ".jpg", ".jpeg"]
 MaxNumThreads = 1
 
+HEADER = "frasmotic creates wordlists from raw data, for example a site dump or folder of ebooks"
+USAGE = "Usage: python frasmotic.py <target file or folder>"
 INVALIDPATHERROR = "Target path does not exist. I'm sorry to have caused you such pericombobulation."
 
 ####	Pre declare a bunch of lists, this approach allows for parallelism with inserts ###
@@ -220,6 +222,9 @@ def Init():
 #				Main function				         #
 ##################################################################################
 def Main():
+
+	print(HEADER)
+	print(USAGE)
 
 	if(len(sys.argv) > 1):							#check for argument
 		Target = sys.argv[1]
