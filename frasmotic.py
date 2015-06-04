@@ -70,6 +70,7 @@ Dictionaries = dict([\
 	('9' , Dictionary9), ('?' , DictionaryMisc)\
 ])
 
+FileList = { }
 DictionariesLock = threading.Lock()
 ThreadLimiter = threading.BoundedSemaphore(1)
 
@@ -167,7 +168,7 @@ def Worker(Line):
 ##################################################################################
 #			Process file, line by line				 #
 ##################################################################################
-def CreateWordList(Path):
+def CreateWordList(Path, Position):
 
 	with open(Path) as File:			#open the file
 		for Line in File:			#iterate through line by line
@@ -189,34 +190,81 @@ def IgnoreFile(File):
 			return(True)
 	return(False)
 
+def UpdateFileList(FileName, Position):
+	FileList[FileName] = Position
+	return
+
 def UpdateDisplay():
 	pass
+
+##################################################################################
+#		Create a resume file, or output the finished article		 #
+##################################################################################
+def CreateOutputFile(Finished):
+	if not Finished:							#if the parameter is false, it means we're writing a resume file
+		OutputFile = "words.resume"
+		with open(OutputFile, "w") as File:				#this syntax is recommended as "pythonic" apparently
+			for FileName, Position in FileList.iteritems():
+				File.write("File:%s:%d\n" % (FileName, Position))
+
+	OutputFile = "words.temp"
+	with open(OutputFile, "w") as File:
+		for Key, List in Dictionaries.iteritems():			#iterate on the list of dictionaries
+			for Word in List:					#then iterate through each dictionary
+				File.write(Word + '\n')				#outputing the words one at a time
+
+		os.rename("words.temp", "words.lst")
+	return
 
 ##################################################################################
 #			Process a given file into a wordlist		         #
 ##################################################################################
 def ProcessFile(File):
+	try:
+		Position = FileList[File]			#look up the file in the list of processed files
+	except Exception as Message:				#unable to find it
+		Position = 0					#start at the beginning
+		UpdateFileList(File, Position)			#add the file to the file list (mark as position 0)
+
 	if(IgnoreFile(File)):					#omit certain file extensions
+		return
+	if(Position == -1):					#already completed this file
+		print("Skipping %s" % File)
 		return
 
 	Start = datetime.now()					#get the starting time
-	CreateWordList(File)					#create wordlist from file
+	CreateWordList(File, Position)				#create wordlist from file
+	UpdateFileList(File, -1)				#mark file as completed in internal records (used to resume)
 	End = datetime.now()					#get the ending time	
 	
 	Elapsed = (End - Start).seconds				#calculate how long it took
+	CreateOutputFile(False)
 	print("%s\t\t%d") % (File, Elapsed)	 		#output number of unique words recovered from file
 
-#	CreateResultFile()
-	OutputFile = "%s.inc" % os.path.basename(File)
-#	OutputFile = "word.lst"
-	Output = open(OutputFile, "w")
-	for Key, List in Dictionaries.iteritems():
-		for Word in List:
-			Output.write(Word + '\n')
-	Output.close()
-
+##################################################################################
+#			Initialise things that need initialisation		 #
+##################################################################################
 def Init():
 	ThreadLimiter = threading.BoundedSemaphore(MaxNumThreads)
+
+def ImportResumeFile():
+	try:
+		with open("words.resume", "r") as File:
+			print("Found resume file...")
+			for Line in File:
+				if("File:" not in Line):
+					return
+				FileName = Line.split(':')[1]
+				Position = Line.split(':')[2]
+
+				FileName = FileName.strip("\'\n")
+				Position = Position.strip("\'\n")
+				FileList[FileName] = int(Position)
+
+	except Exception as Message:
+#		print Message
+		print("Error with resume file")
+		return
 
 ##################################################################################
 #				Main function				         #
@@ -232,6 +280,7 @@ def Main():
 		Target = '.'							#otherwise use current dir
 
 	Init()
+	ImportResumeFile()
 
 	if(os.path.isfile(Target)):						#called on a single file
 		ProcessFile(Target)
@@ -247,6 +296,7 @@ def Main():
 
 			for File in Files:					#for each file found
 				File = SubDirectory + os.sep + File		#get its absolute path
+				File = os.path.abspath(File)
 				ProcessFile(File)
 
 	else:
