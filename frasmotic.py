@@ -1,63 +1,68 @@
 import os, sys, bisect, re, threading, curses
+from sortedcontainers import SortedDict
 from datetime import datetime
 from string import whitespace as WHITESPACECHARS
 
-MaxLength = 16								#maximum word length allowed into dictionary
-MinLength = 6								#minimum word length allowed into dictionary
+MaxLength = 20								#maximum word length allowed into dictionary
+MinLength = 5								#minimum word length allowed into dictionary
 StripChars = ''
 SplitChars = '\' '							#possessive apostraphes
 SplitChars+= '|\s'							#all whitespace	
 SplitChars+= '|\[|\]|\{|\}|\(|\)|\<|\>|\=|:|;|,|#|\"|\.|\||/|\\|\'|\x27|\`|\&|\x9C|\x9D|\x99|\xE2|\x98'		#all these characters
+
 UseThreading = False
 ForceLowerCase = False
 ConcatonateChars = '-+_'
+GroupQuotations = True
 HTMLUnescape = False
+GroupTitles = True
 SortOnLast = False		#option to avoid performance hit on wordlists that are already sorted
 IgnoredFileExtensions = [".inc", ".jpg", ".jpeg"]
 MaxNumThreads = 1
 
+# Text strings (usage etc)
 HEADER = "frasmotic creates wordlists from raw data, for example a site dump or folder of ebooks"
 USAGE = "Usage: python frasmotic.py <target file or folder>"
-INVALIDPATHERROR = "Target path does not exist. I'm sorry to have caused you such pericombobulation."
+INVALIDPATHERROR = "Target path does not exist."
 
-####	Pre declare a bunch of lists, this approach allows for parallelism with inserts ###
-DictionaryA = []
-DictionaryB = []
-DictionaryC = []
-DictionaryD = []
-DictionaryE = []
-DictionaryF = []
-DictionaryG = []
-DictionaryH = []
-DictionaryI = []
-DictionaryJ = []
-DictionaryK = []
-DictionaryL = []
-DictionaryM = []
-DictionaryN = []
-DictionaryO = []
-DictionaryP = []
-DictionaryQ = []
-DictionaryR = []
-DictionaryS = []
-DictionaryT = []
-DictionaryU = []
-DictionaryV = []
-DictionaryW = []
-DictionaryX = []
-DictionaryY = []
-DictionaryZ = []
-Dictionary0 = []
-Dictionary1 = []
-Dictionary2 = []
-Dictionary3 = []
-Dictionary4 = []
-Dictionary5 = []
-Dictionary6 = []
-Dictionary7 = []
-Dictionary8 = []
-Dictionary9 = []
-DictionaryMisc = []
+# Pre declare a bunch of lists, this approach allows for parallelism with inserts
+DictionaryA = SortedDict()
+DictionaryB = SortedDict()
+DictionaryC = SortedDict()
+DictionaryD = SortedDict()
+DictionaryE = SortedDict()
+DictionaryF = SortedDict()
+DictionaryG = SortedDict()
+DictionaryH = SortedDict()
+DictionaryI = SortedDict()
+DictionaryJ = SortedDict()
+DictionaryK = SortedDict()
+DictionaryL = SortedDict()
+DictionaryM = SortedDict()
+DictionaryN = SortedDict()
+DictionaryO = SortedDict()
+DictionaryP = SortedDict()
+DictionaryQ = SortedDict()
+DictionaryR = SortedDict()
+DictionaryS = SortedDict()
+DictionaryT = SortedDict()
+DictionaryU = SortedDict()
+DictionaryV = SortedDict()
+DictionaryW = SortedDict()
+DictionaryX = SortedDict()
+DictionaryY = SortedDict()
+DictionaryZ = SortedDict()
+Dictionary0 = SortedDict()
+Dictionary1 = SortedDict()
+Dictionary2 = SortedDict()
+Dictionary3 = SortedDict()
+Dictionary4 = SortedDict()
+Dictionary5 = SortedDict()
+Dictionary6 = SortedDict()
+Dictionary7 = SortedDict()
+Dictionary8 = SortedDict()
+Dictionary9 = SortedDict()
+DictionaryMisc = SortedDict()
 
 Dictionaries = dict([\
 	('a' , DictionaryA), ('b' , DictionaryB), ('c' , DictionaryC), ('d' , DictionaryD), ('e' , DictionaryE),\
@@ -73,6 +78,7 @@ Dictionaries = dict([\
 FileList = { }
 DictionariesLock = threading.Lock()
 ThreadLimiter = threading.BoundedSemaphore(1)
+reSplitter = re.compile(SplitChars)
 
 ##################################################################################
 #	Removes HTML encoding from a given line	(TODO: Optimise)		 #
@@ -117,17 +123,28 @@ def DoInsert(Word):
 	
 
 #obtain semaphore
-		Index = bisect.bisect_left(Dictionary, Word)			#work out where it should go
 
-		try:
-			if((Index < len(Dictionary)) and (Dictionary[Index] == Word)):				#already there
-				return
-		except Exception as Message:
-			print(Message)
 
-		Dictionary.insert(Index, Word)				#should be unique inserts
+
+
+
+
+#		Index = bisect.bisect_left(Dictionary, Word)			#work out where it should go
+
+#		try:
+#			if((Index < len(Dictionary)) and (Dictionary[Index] == Word)):		#already there
+#				return
+#		except Exception as Message:
+#			print(Message)
+
+#		Dictionary.insert(Index, Word)				#should be unique inserts
 	#print("Inserted \"%s\" at %d" % (Word, Index))
 #release semaphore
+
+
+		if(Word not in Dictionary):
+			Dictionary[Word] = 0
+
 	except Exception as message:
 		print(message)
 	return
@@ -136,13 +153,17 @@ def DoInsert(Word):
 #		Break a line of text down to words and sort them		 #
 ##################################################################################
 def CrunchLine(Line):
-	Line = re.split(SplitChars, Line)				#split based on preselected characters with regex
+	#SplitLine = re.split(SplitChars, Line)				#split based on preselected characters with regex
+	SplitLine = reSplitter.split(Line)
 
-	for Word in Line:						#iterate through the elements now split out
+	for Word in SplitLine:						#iterate through the elements now split out
 		if Word == None:					#check that the word was recovered properly
 			continue					#discard this one and move to the next
 
 		DoInsert(Word)						#add word to dictionary
+
+	#if(GroupQuotations and (Line.count("\"") > 2)):
+	#	SplitLine = re.split("\"", Line)
 
 ##################################################################################
 #		Worker thread processes raw data in a thread safe way		 #
@@ -173,9 +194,6 @@ def CreateWordList(Path, Position):
 	with open(Path) as File:			#open the file
 		for Line in File:			#iterate through line by line
 			if(UseThreading):		#shovel off threads as fast as possible
-				#Number = threading.active_count()
-				#if(Number > 8):
-				#	print(Number)
 				Thread = threading.Thread(target = Worker, args=(Line,))
 				Thread.start()		#yay for optimisation
 			else:
@@ -190,10 +208,16 @@ def IgnoreFile(File):
 			return(True)
 	return(False)
 
+##################################################################################
+#	Update the list of files done with the current position and file	 #
+##################################################################################
 def UpdateFileList(FileName, Position):
 	FileList[FileName] = Position
 	return
 
+##################################################################################
+#			TODO: Write proper display				 #
+##################################################################################
 def UpdateDisplay():
 	pass
 
@@ -211,7 +235,7 @@ def CreateOutputFile(Finished):
 	with open(OutputFile, "w") as File:
 		for Key, List in Dictionaries.iteritems():			#iterate on the list of dictionaries
 			for Word in List:					#then iterate through each dictionary
-				File.write(Word + '\n')				#outputing the words one at a time
+				File.write(Word[0] + '\n')				#outputing the words one at a time
 
 		os.rename("words.temp", "words.lst")
 	return
@@ -246,6 +270,7 @@ def ProcessFile(File):
 ##################################################################################
 def Init():
 	ThreadLimiter = threading.BoundedSemaphore(MaxNumThreads)
+	
 
 def ImportResumeFile():
 	try:
@@ -311,3 +336,16 @@ Main()
 ##################################################################################
 #				End of code					 #
 ##################################################################################
+
+
+#concatonate phrases and quotes based on " character
+#link titles?
+#concatonate hyphonated words
+#concatonate titles and names
+#preserve cases in these cases
+#consider changing use of RE to findall rather than 
+#corpuses - wikiquote, wiktionary, urban dictionary, ACORN (aston corpus project)
+
+
+#possible performance improvement by using dictionaries rather than array with bisect?
+#try using sorteddict from sortedcontainers - more overhead but faster inserts once list grows
