@@ -9,16 +9,16 @@ StripChars = ''
 SplitChars = '\' '							#possessive apostraphes
 SplitChars+= '|\s'							#all whitespace	
 SplitChars+= '|\[|\]|\{|\}|\(|\)|\<|\>|\=|:|;|,|#|\"|\.|\||/|\\|\'|\x27|\`|\&|\x9C|\x9D|\x99|\xE2|\x98'		#all these characters
+AlphaChars = '[a-zA-Z]'
+QuotesString = '\".*?\"'
 
-UseThreading = False
-ForceLowerCase = False
+ForceLowerCase = True
 ConcatonateChars = '-+_'
 GroupQuotations = True
 HTMLUnescape = False
 GroupTitles = True
-SortOnLast = False		#option to avoid performance hit on wordlists that are already sorted
+OmitNumericOnly = True
 IgnoredFileExtensions = [".inc", ".jpg", ".jpeg"]
-MaxNumThreads = 1
 
 # Text strings (usage etc)
 HEADER = "frasmotic creates wordlists from raw data, for example a site dump or folder of ebooks"
@@ -76,9 +76,9 @@ Dictionaries = dict([\
 ])
 
 FileList = { }
-DictionariesLock = threading.Lock()
-ThreadLimiter = threading.BoundedSemaphore(1)
 reSplitter = re.compile(SplitChars)
+reAlphaChars = re.compile(AlphaChars)
+reQuotes = re.compile(QuotesString)
 
 ##################################################################################
 #	Removes HTML encoding from a given line	(TODO: Optimise)		 #
@@ -94,13 +94,8 @@ def UnescapeLine(Line):
 # 		Dertermine the correct dictionary for the word in question	 #
 ##################################################################################
 def IdentifyDictionary(Word):
-	SortChar = ''
 	try:
-		if(SortOnLast):							#to use for pre-sorted corpuses
-			SortChar = Word[-1::1].lower()				#use cut to get the last character
-		else:
-			SortChar = Word[0].lower()
-
+		SortChar = Word[0].lower()
 		Dictionary = Dictionaries[SortChar]				#attempt to identify a suitable dictionary for the word
 	except:
 		return(DictionaryMisc)
@@ -112,38 +107,16 @@ def IdentifyDictionary(Word):
 def DoInsert(Word):
 	try:
 		Length = len(Word)						#calculate length once
-		if((Length >= MaxLength) or (Length <= MinLength)):		#check word length is valid (these should never change at runtime)
+		if((Length >= MaxLength) or (Length <= MinLength)):		#check word length is valid (never change at runtime)
 			return							#outside of defined limits, discard
 
 		if(ForceLowerCase):						#check if we have been asked to force to lower case
 			Word = Word.lower()					#in which case we force it to lower
 
-		with DictionariesLock:
-			Dictionary = IdentifyDictionary(Word)			#identify the right dictionary for this word
+		Dictionary = IdentifyDictionary(Word)				#identify the right dictionary for this word
 	
-
-#obtain semaphore
-
-
-
-
-
-
-#		Index = bisect.bisect_left(Dictionary, Word)			#work out where it should go
-
-#		try:
-#			if((Index < len(Dictionary)) and (Dictionary[Index] == Word)):		#already there
-#				return
-#		except Exception as Message:
-#			print(Message)
-
-#		Dictionary.insert(Index, Word)				#should be unique inserts
-	#print("Inserted \"%s\" at %d" % (Word, Index))
-#release semaphore
-
-
-		if(Word not in Dictionary):
-			Dictionary[Word] = 0
+		if(Word not in Dictionary):					#don't duplicate words
+			Dictionary[Word] = 0					#add it to the dictionary structure, value 0
 
 	except Exception as message:
 		print(message)
@@ -153,52 +126,43 @@ def DoInsert(Word):
 #		Break a line of text down to words and sort them		 #
 ##################################################################################
 def CrunchLine(Line):
-	#SplitLine = re.split(SplitChars, Line)				#split based on preselected characters with regex
-	SplitLine = reSplitter.split(Line)
+	SplitLine = reSplitter.split(Line)				#precompiled regex split function
 
 	for Word in SplitLine:						#iterate through the elements now split out
-		if Word == None:					#check that the word was recovered properly
+		if(Word == None):					#check that the word was recovered properly
 			continue					#discard this one and move to the next
+
+		if(OmitNumericOnly):					#check word for alpha characters before adding it
+			if(reAlphaChars.search(Word) == None):		#words without alpha characters get excluded
+				continue				#more efficient than using error handling approach...
 
 		DoInsert(Word)						#add word to dictionary
 
-	#if(GroupQuotations and (Line.count("\"") > 2)):
-	#	SplitLine = re.split("\"", Line)
 
-##################################################################################
-#		Worker thread processes raw data in a thread safe way		 #
-##################################################################################
-def Worker(Line):
-
-	if(UseThreading):
-		ThreadLimiter.acquire()
-	try:
-		if(HTMLUnescape):				#unescape any html encoding	
-			Line = UnescapeLine(Line)
-		if(len(StripChars)):				#if we have been given characters to strip
-			Line = Line.strip(StripChars)		#strip them before passing the line on to worker
-
-		CrunchLine(Line)				#data suitable for splitting and processing
-	except Exception as Message:
-		print(Message)
-	finally:
-		if(UseThreading):
-			ThreadLimiter.release()
-	return
+	if(GroupQuotations):
+		Quotes = reQuotes.findall(Line)
+		for Quote in Quotes:
+			if(Quote != None):
+				Quote = re.sub('[\s\"]', '', Quote)	#remove all whitespace and quote marks from quotes
+				DoInsert(Quote)
+#				print(Quote)
 
 ##################################################################################
 #			Process file, line by line				 #
 ##################################################################################
 def CreateWordList(Path, Position):
+	with open(Path) as File:						#open the file
+		for Line in File:						#iterate through line by line
+			try:
+				if(HTMLUnescape):				#unescape any html encoding	
+					Line = UnescapeLine(Line)
+				if(len(StripChars)):				#if we have been given characters to strip
+					Line = Line.strip(StripChars)		#strip them before passing the line on to worker
 
-	with open(Path) as File:			#open the file
-		for Line in File:			#iterate through line by line
-			if(UseThreading):		#shovel off threads as fast as possible
-				Thread = threading.Thread(target = Worker, args=(Line,))
-				Thread.start()		#yay for optimisation
-			else:
-				Worker(Line)
-
+				CrunchLine(Line)				#data suitable for splitting and processing
+			except Exception as Message:
+				print(Message)
+		return
 ##################################################################################
 #		Check a passed file name to see if we should ignore it		 #
 ##################################################################################
@@ -235,7 +199,7 @@ def CreateOutputFile(Finished):
 	with open(OutputFile, "w") as File:
 		for Key, List in Dictionaries.iteritems():			#iterate on the list of dictionaries
 			for Word in List:					#then iterate through each dictionary
-				File.write(Word[0] + '\n')				#outputing the words one at a time
+				File.write(Word + '\n')				#outputing the words one at a time
 
 		os.rename("words.temp", "words.lst")
 	return
@@ -269,7 +233,7 @@ def ProcessFile(File):
 #			Initialise things that need initialisation		 #
 ##################################################################################
 def Init():
-	ThreadLimiter = threading.BoundedSemaphore(MaxNumThreads)
+	pass
 	
 
 def ImportResumeFile():
@@ -345,7 +309,3 @@ Main()
 #preserve cases in these cases
 #consider changing use of RE to findall rather than 
 #corpuses - wikiquote, wiktionary, urban dictionary, ACORN (aston corpus project)
-
-
-#possible performance improvement by using dictionaries rather than array with bisect?
-#try using sorteddict from sortedcontainers - more overhead but faster inserts once list grows
