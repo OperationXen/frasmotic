@@ -1,10 +1,32 @@
-import os, sys, bisect, re, threading, curses
+import os, sys, re, unicodedata
 from sortedcontainers import SortedDict
 from datetime import datetime
-from string import whitespace as WHITESPACECHARS
+from docopt import docopt
+
+DocString = """Usage: frasmotic.py SOURCE [-sptu] [--min=N --max=N] 
+
+Generates a wordlist based on the contents of files
+
+Arguments:
+  SOURCE  Source file or folder path (required)
+
+Options:
+  -h --help  		Print this help text
+  -s --suppress  	Suppress single word generation
+  -u --html  		Unescape HTML characters first [default: false]
+  -p --phrases  	Generate phrase dictionary
+  -t --linktitles  	Create compound dictionary from link titles
+  --singlewords=(true|false)  Generate a dictionary of 1-grams
+  --min=N  		Minimum word length [default: 5]
+  --max=N  		Maximum word length [default: 32]
+
+  --version  Print current version information	
+"""
+Target = "."
 
 MaxLength = 32								#maximum word length allowed into dictionary
 MinLength = 5								#minimum word length allowed into dictionary
+
 StripChars = '[]'
 SplitChars = '\' '							#possessive apostrophes
 SplitChars+= '|\s'							#all whitespace	
@@ -21,71 +43,22 @@ ConcatonateChars = '-+_'
 StripLine = False
 HTMLUnescape = True
 
-DoSingleWords = False
+DoSingleWords = True
 ForceLowerCase = True
 GroupQuotations = False
 GroupTitles = False
 GroupLinkText = False
-GroupWikiLinks = True
+GroupWikiLinks = False
 
 OmitNumericOnly = True
 IgnoredFileExtensions = [".inc", ".jpg", ".jpeg"]
-UseResumeFile = True
+UseResumeFile = False
 
 # Text strings (usage etc)
-HEADER = "frasmotic creates wordlists from raw data, for example a site dump or folder of ebooks"
-USAGE = "Usage: python frasmotic.py <target file or folder>"
 INVALIDPATHERROR = "Target path does not exist."
 
-# Pre declare a bunch of lists, this approach allows for parallelism with inserts (which I gave up on)
-DictionaryA = SortedDict()
-DictionaryB = SortedDict()
-DictionaryC = SortedDict()
-DictionaryD = SortedDict()
-DictionaryE = SortedDict()
-DictionaryF = SortedDict()
-DictionaryG = SortedDict()
-DictionaryH = SortedDict()
-DictionaryI = SortedDict()
-DictionaryJ = SortedDict()
-DictionaryK = SortedDict()
-DictionaryL = SortedDict()
-DictionaryM = SortedDict()
-DictionaryN = SortedDict()
-DictionaryO = SortedDict()
-DictionaryP = SortedDict()
-DictionaryQ = SortedDict()
-DictionaryR = SortedDict()
-DictionaryS = SortedDict()
-DictionaryT = SortedDict()
-DictionaryU = SortedDict()
-DictionaryV = SortedDict()
-DictionaryW = SortedDict()
-DictionaryX = SortedDict()
-DictionaryY = SortedDict()
-DictionaryZ = SortedDict()
-Dictionary0 = SortedDict()
-Dictionary1 = SortedDict()
-Dictionary2 = SortedDict()
-Dictionary3 = SortedDict()
-Dictionary4 = SortedDict()
-Dictionary5 = SortedDict()
-Dictionary6 = SortedDict()
-Dictionary7 = SortedDict()
-Dictionary8 = SortedDict()
-Dictionary9 = SortedDict()
-DictionaryMisc = SortedDict()
-
-Dictionaries = dict([\
-	('a' , DictionaryA), ('b' , DictionaryB), ('c' , DictionaryC), ('d' , DictionaryD), ('e' , DictionaryE),\
-	('f' , DictionaryF), ('g' , DictionaryG), ('h' , DictionaryH), ('i' , DictionaryI), ('j' , DictionaryJ),\
-	('k' , DictionaryK), ('l' , DictionaryL), ('m' , DictionaryM), ('n' , DictionaryN), ('o' , DictionaryO),\
-	('p' , DictionaryP), ('q' , DictionaryQ), ('r' , DictionaryR), ('s' , DictionaryS), ('t' , DictionaryT),\
-	('u' , DictionaryU), ('v' , DictionaryV), ('w' , DictionaryW), ('x' , DictionaryX), ('y' , DictionaryY),\
-	('z' , DictionaryZ), ('0' , Dictionary0), ('1' , Dictionary1), ('2' , Dictionary2), ('3' , Dictionary3),\
-	('4' , Dictionary4), ('5' , Dictionary5), ('6' , Dictionary6), ('7' , Dictionary7), ('8' , Dictionary8),\
-	('9' , Dictionary9), ('?' , DictionaryMisc)\
-])
+SingleWords = SortedDict()
+CompoundWords = SortedDict()
 
 FileList = { }
 #Precompiled regexes
@@ -106,33 +79,29 @@ def UnescapeLine(Line):
 	Line = Line.replace("&quot;", "\"")
 	Line = Line.replace("&amp", "&")
 	Line = Line.replace("&#039;", "\'")
+	Line = Line.replace("%22", "\"",)
+	Line = Line.replace("%20", " ",)
 	return(Line)
 
 ##################################################################################
-# 		Dertermine the correct dictionary for the word in question	 #
+#		Convert non-ascii chars in words to ascii			 #
 ##################################################################################
-def IdentifyDictionary(Word):
-	try:
-		SortChar = Word[0].lower()
-		Dictionary = Dictionaries[SortChar]				#attempt to identify a suitable dictionary for the word
-	except:
-		return(DictionaryMisc)
+def Transliterate(Line):
+	Line = ''.join(c for c in unicodedata.normalize('NFD', Line) if unicodedata.category(c) != 'Mn	')
+	return(Line)
 
-	return(Dictionary)
 ##################################################################################
 #       	Worker function to perform sorted insert in thread safe way	 #
 ##################################################################################
-def DoInsert(Word, Phrase):
+def DoInsert(Word, Dictionary, LowerCase):
 	try:
 		Length = len(Word)						#calculate length once
 		if((Length >= MaxLength) or (Length <= MinLength)):		#check word length is valid (never change at runtime)
 			return							#outside of defined limits, discard
 
-		if(ForceLowerCase and not Phrase):				#check if we have been asked to force to lower case
+		if(LowerCase):							#check if we have been asked to force to lower case
 			Word = Word.lower()					#in which case we force it to lower
 
-		Dictionary = IdentifyDictionary(Word)				#identify the right dictionary for this word
-	
 		if(Word not in Dictionary):					#don't duplicate words
 			Dictionary[Word] = 0					#add it to the dictionary structure, value 0
 
@@ -140,18 +109,21 @@ def DoInsert(Word, Phrase):
 		print(message)
 	return
 
+##################################################################################
+#      	Return a string with the first letter of each word capitalised		 #
+##################################################################################
 def CapitaliseString(String):
-	Output = ' '
+	Output = ''
 	try:
 		Words = String.split(' ')
-		CapitalizedWords = []
+		CapitalisedWords = []
 		for Word in Words:
 			if(len(Word) > 2):	
 				TitleCaseWord = Word[0].upper() + Word[1:]
 			else:
 				TitleCaseWord = Word[0].upper()
-			CapitalizedWords.append(TitleCaseWord)
-		Output = ' '.join(CapitalizedWords)
+			CapitalisedWords.append(TitleCaseWord)
+		Output = ''.join(CapitalisedWords)
 	except Exception as Message:
 		pass
 
@@ -175,7 +147,7 @@ def CrunchLine(Line):
 				if(reAlphaChars.search(Word) == None):		#words without alpha characters get excluded
 					continue				#more efficient than using error handling approach...
 	
-			DoInsert(Word, False)					#add word to dictionary
+			DoInsert(Word, SingleWords, ForceLowerCase)		#add word to dictionary
 
 
 	if(GroupQuotations):
@@ -186,10 +158,10 @@ def CrunchLine(Line):
 
 				Output = CapitaliseString(Quote)
 				UpperQuote = re.sub('[\s]', '', Output)	#remove all whitespace
-				DoInsert(UpperQuote, True)
+				DoInsert(UpperQuote, CompoundWords, True)
 
 				Quote = re.sub('[\s]', '', Quote)	#remove all whitespace
-				DoInsert(Quote, False)
+				DoInsert(Quote, CompoundWords, False)
 
 	if(GroupTitles):
 		Titles = reTitles.findall(Line)
@@ -215,10 +187,10 @@ def CrunchLine(Line):
 					Title = UnescapeLine(Title)			#remove encoded html
 					Title = re.sub('\s', '', Title) 		#remove whitespace
 					Title = CapitaliseString(Title)
-					DoInsert(Title, False)
-					DoInsert(Title, True)
+					DoInsert(Title, CompoundWords, False)
+					DoInsert(Title, CompoundWords, True)
 					Title = re.sub('\W', '', Title)
-					DoInsert(Title, False)
+					DoInsert(Title, CompoundWords, False)
 	
 	if(GroupWikiLinks):
 		Links = reWikiLinks.findall(Line)
@@ -230,8 +202,8 @@ def CrunchLine(Line):
 						Title = re.sub('\(.*?\)', '', Title)		#remove stuff in brackets
 						Title = CapitaliseString(Title)
 						Title = re.sub('[\s\W]', '', Title) 		#remove whitespace and punctuation
-						DoInsert(Title, True)
-						DoInsert(Title, False)
+						DoInsert(Title, CompoundWords, True)
+						DoInsert(Title, CompoundWords, False)
 
 ##################################################################################
 #			Process file, line by line				 #
@@ -281,13 +253,12 @@ def CreateOutputFile(Finished):
 			for FileName, Position in FileList.iteritems():
 				File.write("File:%s:%d\n" % (FileName, Position))
 
-	OutputFile = "words.temp"
+	OutputFile = "singlewords.temp"
 	with open(OutputFile, "w") as File:
-		for Key, List in Dictionaries.iteritems():			#iterate on the list of dictionaries
-			for Word in List:					#then iterate through each dictionary
-				File.write(Word + '\n')				#outputing the words one at a time
+		for Word in SingleWords.iteritems():			#iterate on the sorted dictionary of words
+			File.write(Word[0] + '\n')				#outputing the words one at a time to the file
 
-		os.rename("words.temp", "words.lst")
+		os.rename("singlewords.temp", "singlewords.lst")
 	return
 
 ##################################################################################
@@ -319,9 +290,24 @@ def ProcessFile(File):
 #			Initialise things that need initialisation		 #
 ##################################################################################
 def Init():
-	pass
-	
+	try:
+		Options = docopt(DocString, version="0.2")
 
+		Target = Options["SOURCE"]
+		DoSingleWords = not Options["--suppress"]
+		MaxLength = Options["--max"]
+		MinLength = Options["--min"]
+		HTMLUnescape = Options["--html"]
+
+		print(DoSingleWords)
+
+	except Exception as Message:
+		print("Exception:" + str(Message))
+	return
+
+##################################################################################
+#			Import an existing resume file				 #
+##################################################################################
 def ImportResumeFile():
 	if(not UseResumeFile):
 		return
@@ -348,15 +334,6 @@ def ImportResumeFile():
 #				Main function				         #
 ##################################################################################
 def Main():
-
-	print(HEADER)
-	print(USAGE)
-
-	if(len(sys.argv) > 1):							#check for argument
-		Target = sys.argv[1]
-	else:
-		Target = '.'							#otherwise use current dir
-
 	Init()
 	ImportResumeFile()
 
@@ -383,8 +360,6 @@ def Main():
 
 	exit(1)
 
-			
-
 Main()
 ##################################################################################
 #				End of code					 #
@@ -396,5 +371,4 @@ Main()
 #concatonate hyphonated words
 #concatonate titles and names
 #preserve cases in these cases
-#consider changing use of RE to findall rather than 
-#corpuses - wikiquote, wiktionary, urban dictionary, ACORN (aston corpus project)
+#corpuses - wikiquote, wiktionary, urban dictionary
